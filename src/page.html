@@ -141,7 +141,7 @@ const PAGE = {
   name: "mibz2-vs-common",
   version: "2.1.0",
   written: "2026-11-02",
-  home: "https://samshackleton-tech.github.io/mibz2-vs-common/",
+  home: "__HOME__",
   repository: "https://github.com/samshackleton-tech/mibz2-vs-common",
   history: "v1.1.0 (2026-11-01): written by Claude (anthropic/claude-opus-5.5) in a chat " +
     "session, not under version control. v2.0.0 (2026-11-02): checked and revised by a " +
@@ -389,7 +389,7 @@ const REPRO = [
       "# rebuild the alternatives and rerun 'ab run' and 'ab summary' (step D)",
       "# save data.json (button above), put the new ratios in its rows (layout below),",
       "# set view.versions['libbz2-rs'], serve it next to a copy of this page, and open",
-      "#   index.html?data=data.json",
+      "#   PAGE.html?data=data.json (this page's file name)",
       "# or, if a fork's site renders the same table:",
       "#   ?source=https://YOU.github.io/mibz2/benchmarks/alternatives/",
     ],
@@ -463,7 +463,7 @@ function compare(a, b) {
   }
   return bad === 0
     ? { ok: true, text: `the live source page matches this page's pinned snapshot: all ${n} values equal` }
-    : { ok: false, text: `the live source page differs from the pinned snapshot in ${bad} of ${n} values` };
+    : { ok: false, short: `${bad} values differ from the snapshot`, text: `the live source page differs from the pinned snapshot in ${bad} of ${n} values` };
 }
 
 // ---------- state ----------
@@ -552,7 +552,7 @@ function renderStamp() {
   const s = state.src;
   const c = $("checkLine");
   c.className = "check " + (state.check.ok ? "ok" : "warn");
-  c.textContent = state.check.ok ? "" : state.check.text;
+  c.textContent = state.check.ok ? "" : (state.check.short || state.check.text);
   c.title = state.check.text;
   fill($("stamp"),
     link(s.commitUrl, s.commit || "?"), " · ", s.date || "?", " · ",
@@ -713,12 +713,12 @@ async function fetchData(url) {
     } else if (sameRecord) {
       state.check = compare(SNAP_ROWS, got.rows);
     } else {
-      state.check = { ok: false, text: `the source's latest record is ${got.src.commit}, not the pinned ` +
+      state.check = { ok: false, short: `newer record ${got.src.commit}, unchecked`, text: `the source's latest record is ${got.src.commit}, not the pinned ` +
         `${SHA.slice(0, 7)}: showing it unchecked; the provenance below describes ${SHA.slice(0, 7)} only` };
     }
     state.rows = got.rows; state.single = new Set(got.single); state.src = got.src;
   } catch (e) {
-    state.check = { ok: false, text: `fetching ${url} failed (${e.message || e}): showing the pinned snapshot` };
+    state.check = { ok: false, short: "offline: pinned snapshot", text: `fetching ${url} failed (${e.message || e}): showing the pinned snapshot` };
   }
   render();
 })();
