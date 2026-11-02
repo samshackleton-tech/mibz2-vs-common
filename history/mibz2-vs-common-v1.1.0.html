@@ -1,0 +1,733 @@
+
+
+<!doctype html><html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>bzip2 decode time: mibz2 vs lbzip2, libbz2-rs, libbzip2</title>
+<!--
+mibz2-vs-common.html v1.1.0, written 2026-11-01.
+Data: mibz2's benchmark record for commit
+ae942bdb135569224473116ffaa706f1c9e389ed (GitHub Actions run 40988680203).
+Full provenance: the PROV object below, shown under "Provenance" on the page
+and included in the data.json export.
+URL parameters: ?pinned ?source=URL ?data=URL
+-->
+<style>
+* { box-sizing: border-box; }
+body {
+margin: 0; padding: 24px; background: #fff; color: #1d1d1f;
+font: 14px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header {
+display: flex; align-items: center; gap: 14px;
+flex-wrap: wrap; margin-bottom: 18px;
+}
+h1 { font-size: 20px; margin: 0; }
+.mute { color: #8a8a8e; }
+.seg {
+display: inline-flex; margin-left: auto;
+border: 1px solid #ccc; border-radius: 8px; overflow: hidden;
+}
+.seg span { padding: 6px 10px; color: #8a8a8e; }
+.seg button {
+border: 0; background: #fff; padding: 6px 12px;
+font: inherit; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: #1d1d1f; color: #fff; }
+.grid {
+display: grid; gap: 20px 32px;
+grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+}
+.panel h2 { font-size: 15px; margin: 0; }
+.meta { font-size: 12px; margin: 2px 0 6px; }
+.row {
+display: grid; grid-template-columns: 74px 44px 1fr;
+align-items: center; min-height: 22px;
+}
+.name { font-size: 13px; }
+.pips {
+display: flex; flex-wrap: wrap; gap: 2px;
+max-width: 40px; color: #b5b5ba;
+}
+.pip { width: 5px; height: 9px; background: currentColor; border-radius: 1px; }
+.track { position: relative; height: 14px; margin-right: 52px; }
+.bar { position: absolute; left: 0; top: 0; bottom: 0; }
+.whisk {
+position: absolute; top: 50%; height: 2px; margin-top: -1px;
+background: #1d1d1f; opacity: .5;
+}
+.val {
+position: absolute; top: -1px; padding-left: 6px;
+font-size: 11px; color: #8a8a8e; white-space: nowrap;
+}
+.stamp { margin-top: 22px; font-size: 11px; color: #8a8a8e; line-height: 1.6; }
+.stamp a, details a { color: inherit; }
+details { margin-top: 10px; font-size: 12px; color: #3a3a3c; }
+summary { cursor: pointer; color: #8a8a8e; }
+h3 { font-size: 13px; margin: 18px 0 4px; }
+dl.kv {
+display: grid; grid-template-columns: max-content 1fr;
+gap: 2px 12px; margin: 4px 0 4px 6px;
+}
+dl.kv dt { color: #8a8a8e; }
+dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+pre {
+background: #f5f5f7; padding: 10px; overflow-x: auto;
+font-size: 11px; line-height: 1.45;
+}
+.btn {
+font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer;
+border: 1px solid #ccc; border-radius: 6px; background: #fff;
+}
+</style>
+</head>
+<body>
+<header>
+<h1>bzip2 decode time</h1>
+<span class="mute">shorter = faster</span>
+<div class="seg" id="threads"></div>
+</header>
+<main class="grid" id="grid"></main>
+<p class="stamp" id="stamp"></p>
+<details id="prov">
+<summary>Provenance · reproduce · modify</summary>
+<div id="provView"></div>
+<div id="provStatic"></div>
+</details>
+
+<script>
+"use strict";
+
+const PAGE = {
+name: "mibz2-vs-common.html",
+version: "1.1.0",
+written: "2026-11-01",
+author: "Claude (anthropic/claude-opus-5.5) in a chat session; " +
+"this file is not under version control",
+};
+const SCHEMA = "mibz2-alt-subset/1";
+const DEFAULT_SOURCE = "https://lmmx.github.io/mibz2/benchmarks/alternatives/";
+const REPO = "https://github.com/lmmx/mibz2";
+const RAW = "https://raw.githubusercontent.com/lmmx/mibz2";
+const SHA = "ae942bdb135569224473116ffaa706f1c9e389ed";
+const REC = "a02eaf65a8b2c65be4dc53f8622558d3c8a89564";
+const Q = new URLSearchParams(location.search);
+
+const DECODERS = [
+{ key: "mibz2", color: "#1d1d1f", parallel: true },
+{ key: "lbzip2", color: "#159a8c", parallel: true },
+{ key: "libbz2-rs", color: "#e08a1e", parallel: false },
+{ key: "libbzip2", color: "#c8473b", parallel: false },
+];
+
+// Row layout (also the data.json layout):
+// [corpus, "in → out", threads, mibz2 wall s (median), mibz2 MB/s,
+// lbzip2 [ratio, lo95, hi95], libbz2-rs [...], libbzip2 [...]]
+const ROW_LAYOUT = [
+"corpus", "size in → out", "threads", "mibz2 wall s (median)", "mibz2 MB/s",
+"lbzip2 [ratio, lo95, hi95]", "libbz2-rs [ratio, lo95, hi95]",
+"libbzip2 [ratio, lo95, hi95]",
+];
+
+// Copied from the "Wall time against mibz2" table at DEFAULT_SOURCE
+// (record ae942bd), 2026-11-01. No values derived or rounded.
+const SNAP_ROWS = [
+["wikidata", "11.9 MB → 210 MB", 1, 0.754, 278,
+[4.57, 4.53, 4.62], [4.63, 4.59, 4.67], [4.98, 4.95, 5.01]],
+["wikidata", "11.9 MB → 210 MB", 2, 0.495, 424,
+[3.66, 3.52, 3.80], [7.08, 6.82, 7.36], [7.61, 7.34, 7.90]],
+["wikidata", "11.9 MB → 210 MB", 4, 0.394, 533,
+[2.71, 2.68, 2.74], [8.89, 8.81, 8.97], [9.55, 9.48, 9.63]],
+["onebyte", "51 B → 20 MB", 1, 0.021, 952,
+[3.81, 3.64, 4.00], [2.53, 2.41, 2.64], [2.70, 2.58, 2.83]],
+["onebyte", "51 B → 20 MB", 2, 0.022, 920,
+[2.84, 2.78, 2.90], [2.50, 2.45, 2.56], [2.68, 2.62, 2.73]],
+["onebyte", "51 B → 20 MB", 4, 0.022, 905,
+[2.79, 2.75, 2.83], [2.45, 2.41, 2.48], [2.62, 2.58, 2.65]],
+["pattern", "1.12 kB → 19.6 MB", 1, 0.044, 448,
+[2.35, 2.31, 2.38], [1.63, 1.60, 1.65], [1.92, 1.90, 1.95]],
+["pattern", "1.12 kB → 19.6 MB", 2, 0.028, 710,
+[2.25, 2.05, 2.45], [2.43, 2.13, 2.78], [2.88, 2.52, 3.29]],
+["pattern", "1.12 kB → 19.6 MB", 4, 0.030, 644,
+[1.72, 1.66, 1.78], [2.32, 2.25, 2.39], [2.74, 2.66, 2.83]],
+["random", "7.1 MB → 8 MB", 1, 0.153, 52,
+[2.34, 2.33, 2.35], [2.66, 2.64, 2.68], [2.66, 2.64, 2.67]],
+["random", "7.1 MB → 8 MB", 2, 0.095, 84,
+[2.24, 2.07, 2.43], [4.28, 4.11, 4.45], [4.27, 4.10, 4.44]],
+["random", "7.1 MB → 8 MB", 4, 0.075, 107,
+[1.94, 1.84, 2.04], [5.40, 5.28, 5.52], [5.39, 5.27, 5.51]],
+["records", "9.59 MB → 9.6 MB", 1, 0.202, 48,
+[2.28, 2.26, 2.30], [2.75, 2.72, 2.79], [2.71, 2.68, 2.73]],
+["records", "9.59 MB → 9.6 MB", 2, 0.120, 80,
+[2.08, 2.01, 2.16], [4.55, 4.34, 4.77], [4.47, 4.28, 4.68]],
+["records", "9.59 MB → 9.6 MB", 4, 0.093, 103,
+[1.93, 1.88, 1.97], [5.97, 5.88, 6.06], [5.87, 5.80, 5.95]],
+["runs", "38 kB → 10 MB", 1, 0.014, 709,
+[3.32, 3.06, 3.61], [2.22, 2.19, 2.26], [2.37, 2.34, 2.41]],
+["runs", "38 kB → 10 MB", 2, 0.015, 660,
+[2.72, 2.67, 2.77], [2.08, 2.04, 2.12], [2.22, 2.18, 2.26]],
+["runs", "38 kB → 10 MB", 4, 0.015, 654,
+[2.71, 2.67, 2.74], [2.06, 2.03, 2.08], [2.20, 2.17, 2.23]],
+["text", "1.63 MB → 12.2 MB", 1, 0.088, 139,
+[2.91, 2.88, 2.93], [3.16, 3.13, 3.19], [3.33, 3.30, 3.36]],
+["text", "1.63 MB → 12.2 MB", 2, 0.055, 221,
+[2.61, 2.27, 2.99], [5.00, 4.85, 5.15], [5.27, 5.12, 5.43]],
+["text", "1.63 MB → 12.2 MB", 4, 0.047, 261,
+[1.92, 1.81, 2.04], [5.85, 5.68, 6.04], [6.17, 6.00, 6.35]],
+];
+
+const SNAP_SRC = {
+mode: "pinned snapshot",
+from: DEFAULT_SOURCE,
+fetched: "2026-11-01 (copied; time of day not recorded)",
+commit: SHA.slice(0, 7), commitFull: SHA, commitUrl: `${REPO}/commit/${SHA}`,
+pr: "116", prUrl: `${REPO}/pull/116`,
+date: "2026-10-30",
+cpu: "AMD EPYC 7763 64-Core Processor, 4 cores",
+rustc: "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+bench: "bench 3.2.0",
+rounds: "10",
+runUrl: `${REPO}/actions/runs/40988680203`,
+versions: { lbzip2: "2.5", "libbz2-rs": "0.2.5", libbzip2: "1.0.8" },
+};
+
+const PROV = {
+measured: {
+repository: REPO,
+commit: `${REPO}/commit/${SHA}`,
+commit_time: "2026-10-30T01:55:32Z",
+commit_tree: "40808e0fb09e8092bf682b6010d2dc5927d03438",
+commit_parent: "7e7cce49a4f2e3bee716d9f077d1bf0812399136",
+commit_signature: "PGP, verified by GitHub",
+pull_request: `${REPO}/pull/116`,
+mibz2_version: "0.2.1 (Cargo.lock at this commit)",
+workflow: `${REPO}/blob/${SHA}/.github/workflows/bench.yml`,
+workflow_blob: "9faab8422efbaba9d528f9cd8e41ba13bc056f6e",
+run: `${REPO}/actions/runs/40988680203`,
+run_details: "Benchmark #218, attempt 1, push to master, success",
+run_created: "2026-10-30T01:55:35Z",
+run_completed: "2026-10-30T02:16:24Z",
+job: `${REPO}/actions/runs/40988680203/job/123845570274`,
+timed_step: "'Run': 2026-10-30T01:57:50Z to 2026-10-30T02:14:46Z",
+runner: "GitHub-hosted, label ubuntu-latest, " +
+"runner name 'GitHub Actions 1000054925'",
+cpu: "AMD EPYC 7763 64-Core Processor, 4 cores",
+rustc: "1.99.1 (58cf8f9c3 2026-10-13), via dtolnay/rust-toolchain@stable",
+build_profile: "release: lto = fat, codegen-units = 1, " +
+"debug = line-tables-only (every arm)",
+harness: `${REPO}/blob/${SHA}/examples/ab.rs (bench 3.2.0)`,
+command: "bin/ab run runs.jsonl --arms mibz2,pbz2,lbzip2,indexed_bzip2," +
+"fbz@alts/ab,lbzip2-rs@alts/ab,libbzip2,libbz2-rs@alts/ab," +
+"bz2ngrs@alts/ab,bz2ng --threads 1,2,4 --spread --rounds 10 " +
+"--settle 0.25 corpora/*.bz2",
+method: "Each round decodes every corpus once per decoder per thread " +
+"count, in an order rotated each round. 1-thread runs are pinned to " +
+"one CPU; 2-thread runs use one CPU on each of 2 cores (--spread). " +
+"Each figure is the geometric mean of the rounds' paired wall-time " +
+"ratios (alternative / mibz2), with a 95% interval. Single-threaded " +
+"decoders run at 1 thread only, and at 2 and 4 threads their 1-thread " +
+"runs are compared with mibz2 at 2 and 4.",
+output_check: "every decoder produced the same bytes on every corpus " +
+"('same bytes: yes')",
+artifact: `${REPO}/actions/runs/40988680203/artifacts/12948837417`,
+artifact_details: `bench-master-${SHA}, 98680 bytes, ` +
+"sha256:451a29c05d3d24d3e37a72b540d9beaf87e18c2a90675f7e4bcf71158eb8b1bd, " +
+"expires 2027-01-28T01:55:35Z, needs a GitHub login",
+record_commit: `${REPO}/commit/${REC}`,
+record_details: "bench-results branch, 'record bench: ae942bd, " +
+"bench 3.2.0', 2026-10-30T02:16:21Z",
+record_summary: `${RAW}/${REC}/runs/${SHA}.json`,
+record_summary_blob: "d0ae76498e592202c34aa099ece2c7a18052e314 " +
+"(170712 bytes)",
+record_rounds: `${RAW}/${REC}/raw/${SHA}.jsonl`,
+record_rounds_blob: "0eba6ba1e7e3b7f5bd0c6637105c0aa29e94fbcd " +
+"(664008 bytes)",
+record_index: `${RAW}/${REC}/records.jsonl`,
+record_index_blob: "f13d4fe6e9960fac7665143b2160b17806e99b9c " +
+"(11506 bytes)",
+},
+inputs: {
+synthetic: `${REPO}/blob/${SHA}/tests/common/mod.rs ` +
+"(onebyte, pattern, random, records, runs, text: 'bin/ab gen corpora 4')",
+wikidata_spec: `${REPO}/blob/${SHA}/bench/wikidata.json`,
+wikidata_spec_last_changed:
+`${REPO}/commit/2a68359b1e09c620bfb056411b7a89f16a1251a6 ` +
+"(2026-10-27T12:03:50Z, PR #11)",
+wikidata_dump: "https://dumps.wikimedia.org/wikidatawiki/entities/" +
+"20261019/wikidata-20261019-all.json.bz2",
+wikidata_dump_check: "103488697311 bytes, " +
+"sha1 a05b8b809ab80576da6d838c67138ddf401055e6 (CC0; Wikimedia " +
+"serves a dated dump for about six weeks)",
+wikidata_windows: "12 windows of 1 MiB at (2i+1)/24 of the dump, whole " +
+"bzip2 blocks kept bit-exact, each window's SHA-256 pinned in the " +
+"spec; copies kept on the bench-data branch",
+wikidata_corpus: "wikidata.bz2: 11854933 bytes, sha256 " +
+"82f65ace0731962d04443bbda4cebfdccd336106049751060f477941c2c29915, " +
+"decodes to 209700196 bytes",
+},
+decoders: {
+mibz2: "0.2.1 at ae942bd, BzReader through examples/ab.rs; " +
+"1, 2 and 4 threads",
+lbzip2: "2.5, the C program from Ubuntu's package (apt-get install " +
+"lbzip2 on ubuntu-latest): 'lbzip2 -dc -n T' through a pipe; " +
+"1, 2 and 4 threads",
+libbzip2: "1.0.8, built from bundled C source: bzip2 crate 0.4.4 " +
+"(sha256 bdb116a6ef3f6c3698828873ad02c3014b3c85cadb88496095628e3ef1e347f8) " +
+"and bzip2-sys 0.1.13+1.0.8 " +
+"(sha256 225bff33b2141874fe80d71e07d6eec4f85c5c216453dd96388240f96e1acc14), " +
+"feature 'static', MultiBzDecoder; 1 thread",
+"libbz2-rs": "libbz2-rs-sys =0.2.5 through bzip2 =0.6.1 " +
+"(sha256 f3a53fac24f34a81bc9954b5d6cfce0c21e18ec6959f44f56e8e90e4bb7c346c), " +
+`pinned in ${REPO}/blob/${SHA}/bench/alternatives/Cargo.lock ` +
+"(blob f89160e2c0ef63a8acffaaf4b70b979223600ba8), built with " +
+"--locked; 1 thread. Version 0.2.6 (2026-10-29) was not measured.",
+},
+file: {
+name: PAGE.name, version: PAGE.version,
+written: PAGE.written, author: PAGE.author,
+snapshot_from: DEFAULT_SOURCE,
+snapshot_table: "'Wall time against mibz2'; columns corpus, threads, " +
+"mibz2 wall (median), mibz2 MB/s, lbzip2, libbz2-rs ¹, libbzip2 ¹",
+snapshot_fetched: "2026-11-01, time of day not recorded",
+snapshot_page_build: "presumed: " +
+`${REPO}/actions/runs/41344396273 (site.yml at ` +
+"13e9854805eed8944ecdd7c9330e30971b6bf52d, 2026-11-01T19:58:04Z), the " +
+"latest successful site build when checked; not confirmed as the " +
+"build that served the page",
+transformation: "none: every number is the source's own. Bar length is " +
+"the ratio to mibz2's wall time; one block = mibz2's time.",
+},
+gaps: [
+"The figures are the site's rendering of the record. They were not " +
+"recomputed from runs/…json or raw/…jsonl, whose structure wasn't read.",
+"The job log wasn't read (the logs API requires repository admin " +
+"rights; the web UI shows the log). Missing as a result: the Ubuntu " +
+"image version, the kernel, and the exact lbzip2 package version.",
+"Which bench-data branch commit held the Wikidata windows.",
+"SHA-256 checksums of the six synthetic corpora.",
+"The Rust toolchain was 'stable' when the benchmark ran; pin 1.99.1 " +
+"to rebuild with the same compiler.",
+"This file has no commit of its own. Record its SHA-256 when sharing " +
+"it (sha256sum mibz2-vs-common.html).",
+],
+};
+
+const REPRO = [
+{
+t: "A. Redraw the pinned figures (no network)",
+sh: ["open 'mibz2-vs-common.html?pinned'"],
+},
+{
+t: "B. Download the raw record and check it against its git blob IDs",
+sh: [
+`curl -fLO ${RAW}/${REC}/runs/${SHA}.json`,
+`curl -fLO ${RAW}/${REC}/raw/${SHA}.jsonl`,
+`git hash-object ${SHA}.json # d0ae76498e592202c34aa099ece2c7a18052e314`,
+`git hash-object ${SHA}.jsonl # 0eba6ba1e7e3b7f5bd0c6637105c0aa29e94fbcd`,
+],
+},
+{
+t: "C. Measure again on GitHub Actions (your fork)",
+sh: [
+`git push origin ${SHA}:refs/heads/rerun-ae942bd`,
+"gh workflow run bench.yml --ref rerun-ae942bd # leave base empty",
+"gh run watch # results: the run's summary and its artifact",
+],
+},
+{
+t: "D. Measure again locally (Linux, 4 or more CPUs on 2 or more " +
+"physical cores; steps copied from bench.yml at ae942bd, " +
+"with only the four decoders shown)",
+sh: [
+`git clone ${REPO} && cd mibz2 && git checkout ${SHA}`,
+"rustup override set 1.99.1",
+"sudo apt-get install -y lbzip2 cmake python3",
+"cargo build --release --example ab --example windows --example phases",
+"mkdir -p bin && cp target/release/examples/ab bin/ab",
+'LIBSAIS_DIR=$(bash bench/libsais.sh "$PWD/target/libsais"); ' +
+"export LIBSAIS_DIR",
+'CARGO_TARGET_DIR="$PWD/target/alts" cargo build --release --locked \\',
+" --manifest-path bench/alternatives/Cargo.toml",
+"mkdir -p alts && cp target/alts/release/ab target/alts/release/kernels alts/",
+"bin/ab gen corpora 4",
+"dir=$(python3 -c 'import json; " +
+"print(json.load(open(\"bench/wikidata.json\"))[\"windows_dir\"])')",
+"git fetch -q origin bench-data:refs/remotes/origin/bench-data && \\",
+' git archive origin/bench-data "$dir" | tar -x || true',
+'python3 bench/wikidata.py fetch bench/wikidata.json "$dir"',
+'python3 bench/wikidata.py build bench/wikidata.json "$dir" \\',
+" target/release/examples/windows corpora/wikidata.bz2",
+"sha256sum corpora/wikidata.bz2 # 82f65ace0731962d...c2c29915",
+"bin/ab env | tee env.json",
+"bin/ab run runs.jsonl --arms mibz2,lbzip2,libbzip2,libbz2-rs@alts/ab \\",
+" --threads 1,2,$(nproc) --spread --rounds 10 --settle 0.25 corpora/*.bz2",
+"bin/ab summary runs.jsonl --ref mibz2",
+],
+},
+{
+t: "E. Change something and plot it, e.g. libbz2-rs 0.2.6 (untested)",
+sh: [
+"sed -i 's/libbz2-rs-sys = \"=0.2.5\"/libbz2-rs-sys = \"=0.2.6\"/' \\",
+" bench/alternatives/Cargo.toml",
+"cargo update --manifest-path bench/alternatives/Cargo.toml \\",
+" -p libbz2-rs-sys --precise 0.2.6",
+"# rebuild the alternatives and rerun 'ab run' / 'ab summary' (step D)",
+"# save data.json (button below), enter the new ratios in the row",
+"# layout given there, set view.versions['libbz2-rs'], then:",
+"python3 -m http.server 8000",
+"# open http://localhost:8000/mibz2-vs-common.html?data=data.json",
+"# or, if a fork's site renders the same table:",
+"# ?source=https://YOU.github.io/mibz2/benchmarks/alternatives/",
+],
+},
+];
+
+// ---------- helpers ----------
+
+const nowUtc = () => new Date().toISOString().slice(0, 19) + "Z";
+
+function el(tag, attrs = {}, ...kids) {
+const e = document.createElement(tag);
+for (const [k, v] of Object.entries(attrs)) {
+if (v == null) continue;
+if (k === "style") Object.assign(e.style, v);
+else if (k === "class") e.className = v;
+else e.setAttribute(k, v);
+}
+e.append(.kids.flat(Infinity).filter(k => k != null && k !== false));
+return e;
+}
+
+function renderValue(v) {
+if (Array.isArray(v)) {
+return el("ul", {}, v.map(x => el("li", {}, renderValue(x))));
+}
+if (v && typeof v === "object") {
+return el("dl", { class: "kv" }, Object.entries(v).map(([k, x]) =>
+[el("dt", {}, k), el("dd", {}, renderValue(x))]));
+}
+const s = String(v);
+const m = s.match(/^(https?:\/\/\S+)(.*)$/s);
+return m ? [el("a", { href: m[1] }, m[1]), m[2]] : s;
+}
+
+function build(rows) {
+const data = {};
+for (const [c, size, t, s, mbs, lb, rs, cl] of rows) {
+data[c] ??= { size, t: {} };
+data[c].t[t] = { s, mbs, r: { lbzip2: lb, "libbz2-rs": rs, libbzip2: cl } };
+}
+return data;
+}
+
+function checkRows(rows) {
+if (!Array.isArray(rows) || !rows.length) throw new Error("no rows");
+for (const r of rows) {
+const bad = () => new Error("bad row " + JSON.stringify(r).slice(0, 60));
+if (!Array.isArray(r) || r.length !== 8 || typeof r[0] !== "string") {
+throw bad();
+}
+if (![r[2], r[3], r[4]].every(Number.isFinite)) throw bad();
+for (const x of r.slice(5)) {
+if (!Array.isArray(x) || x.length !== 3 || !x.every(Number.isFinite)) {
+throw bad();
+}
+}
+}
+return rows;
+}
+
+function compare(a, b) {
+const key = r => `${r[0]}/${r[2]}`;
+const flat = r => [r[3], r[4], ...r[5], ...r[6], ...r[7]];
+const m = new Map(a.map(r => [key(r), r]));
+let n = 0, bad = Math.abs(a.length - b.length);
+for (const r of b) {
+const s = m.get(key(r));
+if (!s) { bad++; continue; }
+const fa = flat(s), fb = flat(r);
+fa.forEach((x, i) => { n++; if (Math.abs(x - fb[i]) > 1e-9) bad++; });
+}
+return bad === 0
+? `live page matches the pinned snapshot: all ${n} numbers equal`
+: `live page differs from the pinned snapshot in ${bad} of ${n} numbers`;
+}
+
+// ---------- state ----------
+
+let state = {
+rows: SNAP_ROWS, data: build(SNAP_ROWS), src: SNAP_SRC, t: 4,
+check: "pinned snapshot; live check pending",
+};
+
+function setRows(rows, src) {
+state.rows = rows; state.data = build(rows); state.src = src;
+}
+
+// ---------- chart ----------
+
+function scaleMax(data) {
+let m = 1;
+for (const c of Object.values(data))
+for (const v of Object.values(c.t))
+for (const r of Object.values(v.r)) m = Math.max(m, r[2]);
+return Math.ceil(m);
+}
+
+function barRow(dec, ratio, lo, hi, t, max, label, tip) {
+const n = dec.parallel ? t : 1;
+const pips = el("div", {
+class: "pips", title: `${n} thread${n > 1 ? "s" : ""}`,
+}, Array.from({ length: n }, () => el("div", { class: "pip" })));
+const u = 100 / ratio; // one mibz2-time, as % of this bar
+const track = el("div", { class: "track" },
+el("div", {
+class: "bar", title: tip,
+style: {
+width: `${(ratio / max) * 100}%`,
+background: `repeating-linear-gradient(90deg, ${dec.color} 0 ` +
+`calc(${u}% - 2px), transparent calc(${u}% - 2px) ${u}%)`,
+},
+}),
+lo == null ? null : el("div", {
+class: "whisk", title: tip,
+style: {
+left: `${(lo / max) * 100}%`,
+width: `${((hi - lo) / max) * 100}%`,
+},
+}),
+el("span", {
+class: "val",
+style: { left: `${(Math.max(ratio, hi ?? 0) / max) * 100}%` },
+}, label));
+return el("div", { class: "row" },
+el("div", { class: "name", style: { color: dec.color } }, dec.key),
+pips, track);
+}
+
+function render() {
+const { data, src } = state;
+const threads = [...new Set(state.rows.map(r => r[2]))].sort((a, b) => a - b);
+if (!threads.includes(state.t)) state.t = threads[threads.length - 1];
+const t = state.t, max = scaleMax(data);
+
+const seg = document.getElementById("threads");
+seg.replaceChildren(el("span", {}, "threads"), threads.map(n => {
+const b = el("button", { "aria-pressed": String(n === t) }, String(n));
+b.onclick = () => { state.t = n; render(); };
+return b;
+}));
+
+const grid = document.getElementById("grid");
+grid.replaceChildren();
+for (const [corpus, c] of Object.entries(data)) {
+const v = c.t[t];
+if (!v) continue;
+grid.append(el("section", { class: "panel" },
+el("h2", {}, corpus),
+el("div", { class: "meta mute" },
+`${c.size} · mibz2 ${v.s.toFixed(3)} s, ${v.mbs} MB/s`),
+DECODERS.map(dec => {
+if (dec.key === "mibz2") {
+return barRow(dec, 1, null, null, t, max,
+`${v.s.toFixed(3)} s`, "mibz2: 1× (reference)");
+}
+const [r, lo, hi] = v.r[dec.key];
+const ver = (src.versions || {})[dec.key] || "?";
+return barRow(dec, r, lo, hi, t, max, `${r.toFixed(2)}×`,
+`${dec.key} ${ver}: ${r.toFixed(2)}× mibz2's wall time ` +
+`(95% interval ${lo}–${hi})`);
+})));
+}
+renderStamp();
+renderProvView();
+}
+
+function renderStamp() {
+const s = state.src, v = s.versions || {};
+const a = (href, text) => (href ? el("a", { href }, text) : text);
+document.getElementById("stamp").replaceChildren(
+"Data: mibz2 ", a(s.commitUrl, s.commit || "?"),
+s.pr ? [" (", a(s.prUrl, `PR #${s.pr}`), ")"] : null,
+`, recorded ${s.date || "?"} · ${s.cpu || "?"} · ${s.rustc || "?"} · `,
+`${s.bench || "?"} · ${s.rounds || "?"} rounds · `, a(s.runUrl, "run"),
+` · lbzip2 ${v.lbzip2 || "?"} · libbz2-rs ${v["libbz2-rs"] || "?"}`,
+` · libbzip2 ${v.libbzip2 || "?"}`, el("br"),
+`Source: ${s.mode} of `, a(s.from, s.from), ` (${s.fetched})`,
+` · ${state.check} · rendered ${nowUtc()} · ${PAGE.name} v${PAGE.version}`,
+" · one block = mibz2's time · whisker = 95% interval");
+}
+
+// ---------- provenance panel ----------
+
+function renderProvView() {
+const s = state.src;
+document.getElementById("provView").replaceChildren(
+el("h3", {}, "Data in view"),
+renderValue({
+source: `${s.mode}: ${s.from}`,
+fetched: s.fetched,
+commit: s.commitUrl || s.commitFull || s.commit || "?",
+recorded: s.date || "?",
+pull_request: s.prUrl || "?",
+cpu: s.cpu || "?", rustc: s.rustc || "?",
+bench: s.bench || "?", rounds: s.rounds || "?",
+run: s.runUrl || "?",
+versions: s.versions || {},
+check: state.check,
+}),
+el("p", {},
+el("button", { class: "btn", id: "export" }, "Save data.json"),
+" the data in view, its source, and the full provenance below"));
+document.getElementById("export").onclick = exportJson;
+}
+
+function renderProvStatic() {
+document.getElementById("provStatic").replaceChildren(
+el("h3", {}, `Measurement (record ${SHA.slice(0, 7)} only)`),
+renderValue(PROV.measured),
+el("h3", {}, "Inputs"), renderValue(PROV.inputs),
+el("h3", {}, "Decoders"), renderValue(PROV.decoders),
+el("h3", {}, "This file"), renderValue(PROV.file),
+el("h3", {}, "Not captured"), renderValue(PROV.gaps),
+el("h3", {}, "Reproduce and modify"),
+REPRO.map(step => [el("p", {}, step.t), el("pre", {}, step.sh.join("\n"))]),
+el("p", {}, "data.json row layout: " + ROW_LAYOUT.join(" | ")));
+}
+
+function exportJson() {
+const out = {
+schema: SCHEMA, exported: nowUtc(), page: PAGE,
+row_layout: ROW_LAYOUT, view: state.src, check: state.check,
+rows: state.rows, provenance: PROV,
+};
+const blob = new Blob([JSON.stringify(out, null, 2)],
+{ type: "application/json" });
+const link = el("a", { href: URL.createObjectURL(blob), download: "data.json" });
+document.body.append(link); link.click(); link.remove();
+}
+
+// ---------- loading ----------
+
+function parseLive(html, url) {
+const doc = new DOMParser().parseFromString(html, "text/html");
+const abs = h => (h ? new URL(h, url).href : null);
+const h2 = [...doc.querySelectorAll("h2")]
+.find(e => /Wall time against mibz2/i.test(e.textContent));
+let node = h2 && h2.nextElementSibling, table = null;
+while (node && !table && node.tagName !== "H2") {
+table = node.matches("table") ? node : node.querySelector("table");
+node = node.nextElementSibling;
+}
+if (!table) throw new Error("wall-time table not found");
+
+const heads = [...table.querySelectorAll("thead th")]
+.map(th => th.textContent.replace(/[¹\s]+$/u, "").trim());
+const col = name => {
+const i = heads.indexOf(name);
+if (i < 0) throw new Error(`column '${name}' missing`);
+return i;
+};
+const iC = col("corpus"), iT = col("threads");
+const iS = col("mibz2 wall (median)"), iM = col("mibz2 MB/s");
+const iDec = ["lbzip2", "libbz2-rs", "libbzip2"].map(col);
+const ratio = s => {
+const m = s.match(/([\d.]+)×\s*\(([\d.]+)[–-]([\d.]+)\)/);
+if (!m) throw new Error(`bad ratio '${s}'`);
+return m.slice(1, 4).map(Number);
+};
+const rows = [...table.querySelectorAll("tbody tr")].map(tr => {
+const td = [...tr.children].map(x => x.textContent.trim());
+const cm = td[iC].match(/^(\S+)\s*\(([^,]+),/);
+if (!cm) throw new Error(`bad corpus '${td[iC]}'`);
+return [cm[1], cm[2].trim(), +td[iT], parseFloat(td[iS]),
+parseFloat(td[iM]), ...iDec.map(i => ratio(td[i]))];
+});
+checkRows(rows);
+
+const text = doc.body.textContent;
+const ver = re => (text.match(re) || [])[1] || "?";
+const latest = [...doc.querySelectorAll("p")]
+.find(p => /The latest record/.test(p.textContent));
+const cLink = latest && latest.querySelector('a[href*="/commit/"]');
+if (!cLink) throw new Error("commit link not found");
+const commitUrl = abs(cLink.getAttribute("href"));
+const envP = [...doc.querySelectorAll("p")]
+.find(p => /rustc/.test(p.textContent));
+const env = envP ? envP.textContent.split("·").map(x => x.trim()) : [];
+const pr = doc.querySelector('a[href*="/pull/"]');
+const run = doc.querySelector('a[href*="/actions/runs/"]');
+return {
+rows,
+src: {
+mode: "live fetch", from: url, fetched: nowUtc(),
+commit: cLink.textContent.trim(),
+commitFull: commitUrl.split("/commit/")[1] || "",
+commitUrl,
+pr: pr ? (pr.textContent.match(/#(\d+)/) || [])[1] : null,
+prUrl: pr ? abs(pr.getAttribute("href")) : null,
+date: (latest.textContent.match(/\d{4}-\d{2}-\d{2}/) || ["?"])[0],
+cpu: env[0] || "?", rustc: env[1] || "?", bench: env[2] || "?",
+rounds: (text.match(/(\d+) rounds on one runner/) || [])[1] || "?",
+runUrl: run ? abs(run.getAttribute("href")) : url,
+versions: {
+lbzip2: ver(/\blbzip2 (\d+(?:\.\d+)+)/),
+"libbz2-rs": ver(/libbz2-rs (\d+(?:\.\d+)+)/),
+libbzip2: ver(/libbzip2 (\d+(?:\.\d+)+)/),
+},
+},
+};
+}
+
+async function fetchLive(url) {
+const r = await fetch(url, { cache: "no-store" });
+if (!r.ok) throw new Error(`HTTP ${r.status}`);
+return parseLive(await r.text(), url);
+}
+
+async function fetchData(url) {
+const r = await fetch(url, { cache: "no-store" });
+if (!r.ok) throw new Error(`HTTP ${r.status}`);
+const j = await r.json();
+if (j.schema !== SCHEMA) throw new Error(`schema is not ${SCHEMA}`);
+return {
+rows: checkRows(j.rows),
+src: {
+...(j.view || {}), mode: "loaded data.json",
+from: new URL(url, location.href).href, fetched: nowUtc(),
+},
+};
+}
+
+(async () => {
+renderProvStatic();
+render();
+const dataUrl = Q.get("data");
+if (!dataUrl && Q.has("pinned")) {
+state.check = "pinned: no network used";
+render();
+return;
+}
+const url = dataUrl || Q.get("source") || DEFAULT_SOURCE;
+try {
+const got = dataUrl ? await fetchData(dataUrl) : await fetchLive(url);
+setRows(got.rows, got.src);
+if (dataUrl) {
+state.check = "loaded data: not compared with the snapshot";
+} else if (got.src.commitFull === SHA) {
+state.check = compare(SNAP_ROWS, got.rows);
+} else {
+state.check = `live record ${got.src.commit} is not the pinned ` +
+`${SHA.slice(0, 7)}, so it wasn't compared; the run, artifact and ` +
+"build details below describe the pinned record only";
+}
+} catch (e) {
+state.check = `fetching ${url} failed (${e.message || e}); ` +
+"showing the pinned snapshot";
+}
+render();
+})();
+</script>
+</body>
+</html>'
