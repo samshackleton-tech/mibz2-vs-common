@@ -41,10 +41,10 @@ body {
 a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .eyebrow { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--mute); margin: 0 0 6px; }
 h1 { font-size: 28px; line-height: 1.2; letter-spacing: -.01em; margin: 0 0 10px; font-weight: 650; }
-.lede { font-size: 16px; max-width: 70ch; margin: 0 0 6px; }
-.lede b { font-variant-numeric: tabular-nums; }
-.aside { font-size: 14px; color: var(--mute); max-width: 76ch; margin: 6px 0 0; }
-.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 22px 0 10px; }
+.top { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; justify-content: space-between; margin: 8px 0 14px; }
+.top h1 { margin: 0; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.panel h2 .meta { font-size: 12.5px; font-weight: 400; color: var(--faint); margin: 0; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
 .seg span { padding: 6px 10px; color: var(--mute); font-size: 13px; border-right: 1px solid var(--line); }
 .seg button {
@@ -64,7 +64,7 @@ h1 { font-size: 28px; line-height: 1.2; letter-spacing: -.01em; margin: 0 0 10px
 .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 370px), 1fr)); }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 12px; }
 .panel.wide { grid-column: 1 / -1; }
-.panel h2 { font-size: 16px; margin: 0; font-weight: 650; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.panel h2 { font-size: 16px; margin: 0 0 10px; font-weight: 650; cursor: default; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .panel h2 .tag { font-size: 11px; font-weight: 600; color: var(--mute); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
 .desc { font-size: 13px; color: var(--mute); margin: 2px 0 1px; }
 .meta { font-size: 12.5px; color: var(--mute); margin: 0 0 8px; font-variant-numeric: tabular-nums; }
@@ -106,29 +106,25 @@ pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-
 </style>
 </head>
 <body>
-<p class="eyebrow">mibz2 · decoder benchmark · record <span class="hash" id="eyeRec">ae942bd</span></p>
-<h1>bzip2 decode time, in units of mibz2's</h1>
-<p class="lede" id="lede"></p>
-<p class="aside" id="aside"></p>
-
+<header class="top">
+<h1>bzip2 decode time</h1>
 <div class="controls">
   <div class="seg" id="threads" role="group" aria-label="threads"></div>
   <div class="seg" id="show" role="group" aria-label="decoders shown"></div>
 </div>
+</header>
 <div class="legend" aria-hidden="true">
-  <span><span class="lg-blocks"><i></i><i></i><i></i></span> each block = mibz2's time on that corpus</span>
-  <span><span class="lg-whisk"></span> 95% interval</span>
-  <span><span class="pips" style="color:var(--mute)"><span class="pip"></span><span class="pip"></span></span> threads the decoder used</span>
-  <span>shorter is faster</span>
+  <span><span class="lg-blocks"><i></i></span> = mibz2's time</span>
+  <span><span class="lg-whisk"></span> 95%</span>
+  <span><span class="pips" style="color:var(--mute)"><span class="pip"></span><span class="pip"></span></span> threads</span>
 </div>
 
 <main class="grid" id="grid"></main>
 
 <div class="foot">
-  <div id="stamp"></div>
-  <span class="check" id="checkLine"></span>
+  <span class="check" id="checkLine"></span> <span id="stamp"></span>
   <details id="prov">
-    <summary>Provenance · checks · reproduce · modify</summary>
+    <summary>details</summary>
     <div id="provView"></div>
     <div id="provStatic"></div>
   </details>
@@ -502,44 +498,6 @@ function barRow(key, ratio, lo, hi, n, max, label, tip, win) {
   return el("div", { class: "row" }, el("div", { class: "name", style: { color }, title: key }, key), pips, track);
 }
 
-function renderLede(v) {
-  const t = v.t = state.t;
-  const common = DECODERS.filter(d => d.common && d.key !== "mibz2" && v.present.has(d.key)).map(d => d.key);
-  // "lbzip2 takes 1.72–2.79× as long as mibz2, libbz2-rs 2.06–8.89× and libbzip2 2.20–9.55×."
-  const parts = common.map((k, i) => [
-    el("b", {}, k), i === 0 ? " takes " : " ", span(v.rows.map(r => r[5][k][0])),
-    i === 0 ? " as long as mibz2" : "",
-    i < common.length - 2 ? ", " : i === common.length - 2 ? " and " : "."]);
-  const tw = t === 1 ? "1 thread" : `${t} threads`;
-  fill($("lede"), `With mibz2 on ${tw}, across ${v.rows.length} corpora, `, parts);
-  // Faster than mibz2 at this thread count: the whole 95% interval below 1.
-  const faster = {};
-  for (const r of v.rows) for (const k of OTHERS) {
-    const x = r[5][k];
-    if (x && x[2] < 1) (faster[k] ??= []).push(`${r[0]} (${fmtR(x[0])})`);
-  }
-  const single = v.shown.map(d => d.key).filter(k => state.single.has(k));
-  const others = OTHERS.filter(k => !DECODERS.find(d => d.key === k).common && v.present.has(k));
-  const fk = Object.keys(faster);
-  fill($("aside"),
-    t > 1 && single.length
-      ? `${list(single)} ${single.length > 1 ? "are" : "is"} single-threaded: ${single.length > 1 ? "their bars are their" : "its bar is its"} 1-thread runs, beside mibz2 on ${t}. `
-      : null,
-    state.show === "common"
-      ? [`${others.length} more decoders were measured in the same run. `,
-         fk.length
-           ? [fk.map((k, i) => [i ? "; " : "", el("b", {}, k), ` is faster than mibz2 on ${list(faster[k])}`]), ". "]
-           : "None is faster than mibz2 at this thread count. ",
-         el("a", { href: "?show=all", onclick: "return showAll(event)" }, "Show all decoders"), "."]
-      : fk.length
-        ? ["Faster than mibz2 here (the whole 95% interval below 1×): ",
-           fk.map((k, i) => [i ? "; " : "", el("b", {}, k), ` on ${list(faster[k])}`]), "."]
-        : "No decoder is faster than mibz2 at this thread count.");
-}
-
-function showAll(ev) { if (ev) ev.preventDefault(); state.show = "all"; render(); return false; }
-window.showAll = showAll;
-
 function seg(node, label, options, current, set) {
   fill(node, el("span", {}, label), options.map(([value, text]) => {
     const b = el("button", { type: "button", "aria-pressed": String(value === current) }, text);
@@ -551,17 +509,14 @@ function seg(node, label, options, current, set) {
 function render() {
   const v = view();
   seg($("threads"), "threads", v.threads.map(n => [n, String(n)]), state.t, n => { state.t = n; });
-  seg($("show"), "decoders", [["common", "common 4"], ["all", `all ${v.present.size + 1}`]], state.show, s => { state.show = s; });
-  renderLede(v);
+  seg($("show"), "decoders", [["common", "4"], ["all", String(v.present.size + 1)]], state.show, s => { state.show = s; });
   const grid = $("grid");
   fill(grid);
   for (const r of v.rows) {
     const [corpus, size, t, s, mbs, ratios] = r;
     const info = CORPUS_INFO[corpus];
     grid.append(el("section", { class: "panel" + (info && info[0] === "real data" ? " wide" : "") },
-      el("h2", {}, corpus, info ? el("span", { class: "tag" }, info[0]) : null),
-      info ? el("div", { class: "desc" }, info[1]) : null,
-      el("div", { class: "meta" }, `${size} · mibz2 ${s.toFixed(3)} s, ${mbs} MB/s of output`),
+      el("h2", { title: info ? info[1] : null }, corpus, el("span", { class: "meta" }, size)),
       v.shown.map(d => {
         if (d.key === "mibz2") return barRow("mibz2", 1, null, null, t, v.max, `${s.toFixed(3)} s`, "mibz2: the reference (1×)");
         const x = ratios[d.key];
@@ -584,18 +539,14 @@ function render() {
 
 function renderStamp() {
   const s = state.src;
-  $("eyeRec").textContent = s.commit || "?";
-  fill($("stamp"),
-    "Data: mibz2's benchmark record for ", link(s.commitUrl, s.commit || "?"),
-    s.pr ? [" (", link(s.prUrl, `PR #${s.pr}`), ")"] : null,
-    `, measured ${s.date || "?"} in one `, link(s.runUrl, "GitHub Actions run"),
-    ` on ${s.cpu || "?"}, ${s.rounds || "?"} rounds, ${s.rustc || "?"}, ${s.bench || "?"}. `,
-    "Source: ", link(s.from, s.mode === "live fetch" ? "the mibz2 site's alternatives page" : s.from),
-    ` (${s.mode}, ${s.fetched}). `,
-    link(PAGE.repository, `${PAGE.name} v${PAGE.version}`), ".");
   const c = $("checkLine");
   c.className = "check " + (state.check.ok ? "ok" : "warn");
-  c.textContent = state.check.text;
+  c.textContent = state.check.ok ? "" : state.check.text;
+  c.title = state.check.text;
+  fill($("stamp"),
+    link(s.commitUrl, s.commit || "?"), " · ", s.date || "?", " · ",
+    link(s.runUrl, "run"), " · ", link(s.from, "source"), " · ",
+    link(PAGE.repository, `v${PAGE.version}`));
 }
 
 // ---------- provenance panel ----------
