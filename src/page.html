@@ -518,7 +518,8 @@ function render() {
     grid.append(el("section", { class: "panel" + (info && info[0] === "real data" ? " wide" : "") },
       el("h2", { title: info ? info[1] : null }, corpus, el("span", { class: "meta" }, size)),
       v.shown.map(d => {
-        if (d.key === "mibz2") return barRow("mibz2", 1, null, null, t, v.max, `${s.toFixed(3)} s`, "mibz2: the reference (1×)");
+        if (d.key === "mibz2") return barRow("mibz2", 1, null, null, t, v.max, `${mbs} MB/s`,
+          `mibz2: ${mbs} MB/s of decompressed output (median wall time ${s.toFixed(3)} s); the reference, 1×`);
         const x = ratios[d.key];
         if (!x) return null;
         const [q, lo, hi] = x;
